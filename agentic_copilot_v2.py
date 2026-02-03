@@ -244,7 +244,7 @@ class ETAPredictor:
                 phase: TrainingPhase) -> Dict[str, any]:
         if self.ema_time_per_epoch is None or current_epoch >= total_epochs:
             return {'eta_seconds': 0, 'eta_formatted': 'Complete', 'confidence': 'High', 
-                   'confidence_reason': 'Training finished'}
+                   'confidence_reason': 'Training finished', 'earliest_possible': 'Complete','latest_possible': 'Complete'}
 
         remaining_epochs = total_epochs - current_epoch
 
