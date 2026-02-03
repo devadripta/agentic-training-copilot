@@ -1,6 +1,8 @@
-# Agentic Training Observability
+# Agentic Training Observability 
 
-> Not a log watcher. An intelligent training supervisor.
+> (⚠️ Early-stage training observability tool under active development.)
+
+> Not a log watcher. An intelligent training supervisor. 
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
