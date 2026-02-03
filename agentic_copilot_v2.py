@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agentic Training Observability System v2.0
+Agentic Training Observability System v2.1
 
 Not a log watcher. An intelligent training supervisor.
 
@@ -9,15 +9,18 @@ Architecture:
 
 Key Innovation:
     Narrative-driven state transitions, not metric spam.
+    Platform-agnostic auto-discovery.
 
 Author: AI Training Copilot Project
-Version: 2.0 (Production)
+Version: 2.1 (Production - Enhanced)
 """
 
 import re
 import time
 import argparse
 import requests
+import os
+import glob
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, List, Tuple
@@ -316,6 +319,127 @@ class ETAPredictor:
             return f"{int(seconds/60)}m"
         else:
             return f"{int(seconds/3600)}h {int((seconds%3600)/60)}m"
+
+# ============== LOG DISCOVERY ENGINE ==============
+
+class LogDiscovery:
+    """
+    Platform-agnostic log discovery engine.
+    
+    Philosophy: Files are universal. Platforms are temporary.
+    """
+    
+    def __init__(self):
+        self.common_patterns = [
+            "*.log",
+            "**/*.log",
+            "**/train.log",
+            "**/training.log",
+            "**/*train*.log"
+        ]
+        
+        self.search_paths = self._build_search_paths()
+        self.min_log_size = 1000  # Ignore tiny/empty logs
+        
+    def _build_search_paths(self) -> List[str]:
+        """
+        Build intelligent search paths with optional platform hints.
+        Never REQUIRES platform-specific logic.
+        """
+        paths = [
+            ".",  # Current directory (universal)
+            "./work_dirs",
+            "./outputs",
+            "./runs",
+            "./logs",
+            "./experiments",
+        ]
+        
+        # Optional platform hints (non-breaking)
+        if os.path.exists("/kaggle/working"):
+            paths.append("/kaggle/working")
+        
+        if os.path.exists("/content"):  # Colab
+            paths.append("/content")
+            
+        return [p for p in paths if os.path.exists(p)]
+    
+    def find_latest_log(self, base_dir: Optional[str] = None, 
+                       max_wait: int = 300) -> Optional[str]:
+        """
+        Find the most recently modified log file.
+        
+        Args:
+            base_dir: Optional starting directory (default: intelligent search)
+            max_wait: Maximum seconds to wait for log (0 = no wait)
+            
+        Returns:
+            Path to log file or None
+        """
+        start_time = time.time()
+        
+        while True:
+            log_file = self._scan_for_logs(base_dir)
+            
+            if log_file:
+                print(f"✅ Found log: {log_file}")
+                print(f"   Size: {os.path.getsize(log_file) / 1024:.1f} KB")
+                print(f"   Modified: {datetime.fromtimestamp(os.path.getmtime(log_file)).strftime('%H:%M:%S')}")
+                return log_file
+            
+            elapsed = time.time() - start_time
+            if max_wait == 0 or elapsed > max_wait:
+                return None
+                
+            if int(elapsed) % 30 == 0:  # Print every 30s
+                print(f"⏳ Waiting for training log... ({int(elapsed)}s / {max_wait}s)")
+            
+            time.sleep(1)
+    
+    def _scan_for_logs(self, base_dir: Optional[str] = None) -> Optional[str]:
+        """Scan for valid log files"""
+        search_dirs = [base_dir] if base_dir else self.search_paths
+        
+        all_logs = []
+        
+        for search_dir in search_dirs:
+            try:
+                for pattern in self.common_patterns:
+                    full_pattern = os.path.join(search_dir, pattern)
+                    found = glob.glob(full_pattern, recursive=True)
+                    all_logs.extend(found)
+            except Exception as e:
+                continue  # Skip inaccessible directories
+        
+        # Filter valid logs
+        valid_logs = [
+            f for f in all_logs 
+            if os.path.isfile(f) 
+            and os.path.getsize(f) > self.min_log_size
+            and self._is_training_log(f)
+        ]
+        
+        if not valid_logs:
+            return None
+        
+        # Return most recently modified
+        return max(valid_logs, key=os.path.getmtime)
+    
+    def _is_training_log(self, filepath: str) -> bool:
+        """Quick heuristic: does this look like a training log?"""
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                sample = f.read(2000)  # First 2KB
+                
+            # Look for training indicators
+            indicators = [
+                'epoch', 'loss', 'train', 'iteration',
+                'lr:', 'acc:', 'Epoch(train)', 'mmengine'
+            ]
+            
+            return any(ind.lower() in sample.lower() for ind in indicators)
+        except:
+            return False
 
 # ============== NOTIFICATION SYSTEM ==============
 
@@ -692,16 +816,77 @@ class AgenticTrainingCopilot:
         print("\n" + msg.replace('*', '').replace('`', ''))
 
 def main():
-    parser = argparse.ArgumentParser(description='Agentic Training Observability System')
-    parser.add_argument('--log', required=True, help='Path to training log')
+    parser = argparse.ArgumentParser(
+        description='Agentic Training Observability System v2.1',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Explicit log path
+  python copilot.py --log work_dirs/exp/train.log
+  
+  # Auto-discovery mode (platform-agnostic)
+  python copilot.py --auto
+  
+  # Auto-discovery with Telegram
+  python copilot.py --auto --token BOT_TOKEN --chat CHAT_ID
+  
+  # Wait up to 10 minutes for log to appear
+  python copilot.py --auto --wait 600
+        """
+    )
+    
+    # Log source options (mutually exclusive)
+    log_group = parser.add_mutually_exclusive_group(required=True)
+    log_group.add_argument('--log', help='Explicit path to training log')
+    log_group.add_argument('--auto', action='store_true', 
+                          help='Auto-discover latest training log (platform-agnostic)')
+    
+    # Auto-discovery options
+    parser.add_argument('--base-dir', default=None,
+                       help='Base directory for auto-discovery (default: intelligent search)')
+    parser.add_argument('--wait', type=int, default=60,
+                       help='Max seconds to wait for log in auto mode (default: 60, 0=no wait)')
+    
+    # Notification options
     parser.add_argument('--token', default='', help='Telegram bot token')
     parser.add_argument('--chat', default='', help='Telegram chat ID')
-    parser.add_argument('--from-start', action='store_true', help='Read from beginning')
+    
+    # Behavior options
+    parser.add_argument('--from-start', action='store_true', 
+                       help='Read from beginning (default: tail from end)')
 
     args = parser.parse_args()
 
+    print("🚀 Agentic Training Copilot v2.1")
+    print("   Platform-Agnostic Training Supervisor\n")
+
+    # Determine log file
+    if args.auto:
+        print("🔍 Auto-discovery mode enabled")
+        print("   Scanning for training logs...\n")
+        
+        discovery = LogDiscovery()
+        log_file = discovery.find_latest_log(
+            base_dir=args.base_dir,
+            max_wait=args.wait
+        )
+        
+        if not log_file:
+            print("\n❌ No training log found")
+            print("   Searched:")
+            for path in discovery.search_paths:
+                print(f"     • {path}")
+            print("\n💡 Suggestions:")
+            print("   • Use --log to specify explicit path")
+            print("   • Use --wait 300 to wait up to 5 minutes")
+            print("   • Check that training has started")
+            return
+    else:
+        log_file = args.log
+
+    # Start watching
     copilot = AgenticTrainingCopilot(args.token, args.chat)
-    copilot.watch(args.log, start_end=not args.from_start)
+    copilot.watch(log_file, start_end=not args.from_start)
 
 if __name__ == "__main__":
     main()
